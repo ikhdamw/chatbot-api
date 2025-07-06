@@ -31,6 +31,9 @@ class InputQuery(BaseModel):
     tech: str  # "dart" atau "flutter"
     user_context: str  # teks bebas dari user
 
+@app.get("/")
+def read_root():
+    return {"message": "Hello from FastAPI on Railway"}
 
 @app.post("/suggest-question")
 def suggest_question(input_data: InputQuery):
