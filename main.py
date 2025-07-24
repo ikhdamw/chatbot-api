@@ -1,16 +1,33 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer, util
+import requests
 import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 
 app = FastAPI()
 
-# Load model yang kecil dan ringan
-def load_model():
-    return SentenceTransformer('paraphrase-MiniLM-L3-v2')
+# === Cohere setup ===
+COHERE_API_KEY = "juoSGEbDotqjxOLPLjNwSFfEEDPT82fVPRcv4qLD"
+COHERE_URL = "https://api.cohere.ai/v1/embed"
+MODEL_NAME = "embed-english-v3.0"
 
-model = load_model()
+def get_embeddings(texts, input_type="search_document"):
+    response = requests.post(
+        COHERE_URL,
+        headers={
+            "Authorization": f"Bearer {COHERE_API_KEY}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": MODEL_NAME,
+            "texts": texts,
+            "input_type": input_type
+        }
+    )
+    res = response.json()
+    return res["embeddings"]
 
+# === Static questions & answers ===
 tech_questions = {
     "dart": [
         "Apa itu Function dalam Dart?",
@@ -45,6 +62,7 @@ answers = {
     ]
 }
 
+# === Models ===
 class InputQuery(BaseModel):
     tech: str
     user_context: str
@@ -53,9 +71,10 @@ class AnswerInput(BaseModel):
     tech: str
     question: str
 
+# === Routes ===
 @app.get("/")
 def read_root():
-    return {"message": "Hello from FastAPI"}
+    return {"message": "Hello from FastAPI with Cohere"}
 
 @app.get("/questions")
 def get_questions(tech: str):
@@ -71,16 +90,35 @@ def suggest_question(input_data: InputQuery):
         return {"error": f"Invalid tech value: '{tech}'. Pilih 'dart' atau 'flutter'."}
 
     questions = tech_questions[tech]
-    question_embeddings = model.encode(questions, convert_to_numpy=True)
-    user_embedding = model.encode(input_data.user_context, convert_to_numpy=True)
 
-    cosine_scores = util.cos_sim(user_embedding, question_embeddings).numpy()
-    best_index = int(np.argmax(cosine_scores))
+    try:
+        # Dapatkan embeddings
+        question_embeddings = get_embeddings(questions, input_type="search_document")
+        user_embedding = get_embeddings([input_data.user_context], input_type="search_query")[0]
 
-    return {
-        "suggested_question": questions[best_index],
-        "confidence_score": float(cosine_scores[0][best_index])
-    }
+        # Hitung cosine similarity
+        scores = cosine_similarity([user_embedding], question_embeddings)[0]
+
+        # Ambil indeks top-N
+        max_return = min(3, len(questions))
+        top_indices = np.argsort(scores)[::-1][:max_return]
+
+        # Pastikan minimal 1 hasil
+        if len(top_indices) < 1:
+            return {"error": "Jumlah pertanyaan terlalu sedikit untuk memberi saran."}
+
+        suggestions = []
+        for i in top_indices:
+            suggestions.append({
+                "question": questions[i],
+                "confidence_score": float(scores[i])
+            })
+
+        return {
+            "suggested_questions": suggestions
+        }
+    except Exception as e:
+        return {"error": f"Gagal mendapatkan saran pertanyaan: {str(e)}"}
 
 @app.post("/answer-question")
 def answer_question(data: AnswerInput):
