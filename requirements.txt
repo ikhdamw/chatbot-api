@@ -1,4 +1,5 @@
 fastapi
-uvicorn
-sentence-transformers
+uvicorn[standard]
+requests
+scikit-learn
 numpy
